@@ -9,7 +9,7 @@ const STAGE_STYLES: Record<StageState, string> = {
     active: 'border-foreground/40 bg-accent',
     done: 'border-border bg-card',
     fail: 'border-destructive/40 bg-destructive/10',
-    idle: 'border-border bg-card opacity-60',
+    idle: 'border-border bg-card',
     pass: 'border-[var(--badge-success-bg)] bg-[var(--badge-success-bg)]/10',
 };
 

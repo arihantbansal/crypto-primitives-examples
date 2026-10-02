@@ -1,9 +1,8 @@
-import { useEffect, useState } from 'react';
+import { useEffect, useId, useRef, useState } from 'react';
 import { Link, useLocation } from 'react-router';
 import { useCluster, type SolanaClusterId } from '@solana/connector/react';
 import { Button, TextInput } from '@solana/design-system';
 import { ChevronDown, Menu, Plus, Settings2, Trash2 } from 'lucide-react';
-import { toast } from 'sonner';
 
 import {
     Dialog,
@@ -32,8 +31,16 @@ function ClusterButton() {
     const [dialogOpen, setDialogOpen] = useState(false);
     const [url, setUrl] = useState('');
     const [saving, setSaving] = useState(false);
+    const [rpcError, setRpcError] = useState<string | null>(null);
+    const rpcInputId = useId();
+    const rpcErrorId = useId();
+    const rpcInputRef = useRef<HTMLInputElement>(null);
 
     const hasCustom = readCustomRpc() !== null;
+
+    useEffect(() => {
+        if (rpcError) rpcInputRef.current?.focus();
+    }, [rpcError]);
 
     async function selectCluster(id: SolanaClusterId) {
         localStorage.setItem('crypto-primitives-cluster', id);
@@ -42,30 +49,35 @@ function ClusterButton() {
 
     function openDialog() {
         setUrl(readCustomRpc()?.url ?? '');
+        setRpcError(null);
         setDialogOpen(true);
     }
 
     async function handleSave() {
         const trimmed = url.trim();
+        function showError(message: string) {
+            setRpcError(message);
+        }
         if (!isValidRpcUrl(trimmed)) {
-            toast.error('Enter a valid http(s) RPC URL');
+            showError('Enter a valid http(s) RPC URL.');
             return;
         }
+        setRpcError(null);
         setSaving(true);
         try {
             const network = await detectNetwork(trimmed);
             if (!network) {
-                toast.error('Could not detect the network from this RPC URL');
+                showError('Could not detect the network from this RPC URL.');
                 return;
             }
             if (network !== 'devnet') {
-                toast.error('This demo runs on devnet only — enter a devnet RPC URL');
+                showError('This demo runs on devnet only. Enter a devnet RPC URL.');
                 return;
             }
             saveCustomRpc(trimmed, network);
             window.location.reload();
         } catch {
-            toast.error('Could not reach RPC URL');
+            showError('Could not reach this RPC URL. Check the address and try again.');
         } finally {
             setSaving(false);
         }
@@ -120,12 +132,32 @@ function ClusterButton() {
                             endpoint; saving reloads the page and selects it.
                         </DialogDescription>
                     </DialogHeader>
-                    <TextInput
-                        value={url}
-                        onChange={e => setUrl(e.currentTarget.value)}
-                        placeholder="https://my-rpc.example.com"
-                        inputClassName="font-mono"
-                    />
+                    <div className="space-y-2">
+                        <label htmlFor={rpcInputId} className="text-sm font-medium">
+                            RPC URL
+                        </label>
+                        <TextInput
+                            ref={rpcInputRef}
+                            id={rpcInputId}
+                            name="rpc-url"
+                            type="url"
+                            autoComplete="url"
+                            value={url}
+                            onChange={e => {
+                                setUrl(e.currentTarget.value);
+                                setRpcError(null);
+                            }}
+                            placeholder="https://my-rpc.example.com"
+                            inputClassName="font-mono"
+                            aria-invalid={rpcError ? true : undefined}
+                            aria-describedby={rpcError ? rpcErrorId : undefined}
+                        />
+                        {rpcError && (
+                            <p id={rpcErrorId} className="text-sm text-destructive">
+                                {rpcError}
+                            </p>
+                        )}
+                    </div>
                     <DialogFooter>
                         <Button variant="secondary" disabled={saving} onClick={() => setDialogOpen(false)}>
                             Cancel
@@ -159,6 +191,7 @@ function NavLinks({ items, pathname }: { items: NavItem[]; pathname: string }) {
                                 ? 'bg-sand-200 text-foreground'
                                 : 'text-sand-1100 hover:bg-sand-100 hover:text-foreground',
                         )}
+                        aria-current={active ? 'page' : undefined}
                     >
                         {item.label}
                     </Link>
@@ -221,7 +254,11 @@ export function AppHeader() {
                         <DropdownMenuContent align="end" className="w-56">
                             {NAV_ITEMS.map(item => (
                                 <DropdownMenuItem key={item.path} asChild>
-                                    <Link to={item.path} className="flex items-center gap-2">
+                                    <Link
+                                        to={item.path}
+                                        aria-current={isActive(pathname, item.path) ? 'page' : undefined}
+                                        className="flex items-center gap-2"
+                                    >
                                         <item.icon className="h-4 w-4" />
                                         {item.label}
                                     </Link>

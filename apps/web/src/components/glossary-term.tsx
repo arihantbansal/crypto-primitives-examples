@@ -6,9 +6,12 @@ export function GlossaryTerm({ children, definition }: { children: ReactNode; de
     return (
         <Tooltip>
             <TooltipTrigger asChild>
-                <span className="cursor-help underline decoration-dotted decoration-sand-700 underline-offset-2">
+                <button
+                    type="button"
+                    className="cursor-help underline decoration-dotted decoration-sand-700 underline-offset-2 focus-visible:outline-2 focus-visible:outline-offset-2"
+                >
                     {children}
-                </span>
+                </button>
             </TooltipTrigger>
             <TooltipContent>{definition}</TooltipContent>
         </Tooltip>
