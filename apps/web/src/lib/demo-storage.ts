@@ -1,3 +1,7 @@
+export function demoStorageKey(demo: string, clusterId: string, endpoint: string): string {
+    return `crypto-primitives-${demo}-demo:${encodeURIComponent(clusterId)}:${encodeURIComponent(endpoint)}`;
+}
+
 export function loadDemoState<T>(key: string): T | null {
     try {
         const raw = sessionStorage.getItem(key);

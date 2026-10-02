@@ -26,10 +26,12 @@ import {
 import { useClusterConfig } from '@/hooks/use-cluster-config';
 import { useRpc } from '@/hooks/useRpc';
 import { ensureFunded, getDemoWallet, InsufficientDemoFundsError } from '@/lib/demo-wallet';
+import { useDemoSession } from '@/lib/demo-session';
 import { COMPARISON_SYMBOL, type ComparisonOp, shiftCiphertextForClaim, U64_MAX } from '@/lib/elgamal';
 import { getClusterFromClusterId, getSolanaExplorerUrl } from '@/lib/explorer';
 import { bytesToHex } from '@/lib/hex';
 import { formatTransactionError } from '@/lib/transactionErrors';
+import { optionalComputeUnits } from '@/lib/transaction-metadata';
 
 type ProofKind = 'equality' | 'range' | 'zero';
 
@@ -125,6 +127,7 @@ export function ElGamalDemo() {
     const rpc = useRpc();
     const signAndSend = useWalletTransactionSignAndSend();
     const { id: clusterId } = useClusterConfig();
+    const { getSignal } = useDemoSession();
     const { dialog: fundingDialog, requestFunding } = useDemoWalletFunding();
 
     const [wallet, setWallet] = useState<KeyPairSigner | null>(null);
@@ -137,10 +140,13 @@ export function ElGamalDemo() {
     const [error, setError] = useState<string | null>(null);
 
     useEffect(() => {
+        const signal = getSignal();
         getDemoWallet()
-            .then(setWallet)
+            .then(value => {
+                if (!signal.aborted) setWallet(value);
+            })
             .catch(() => undefined);
-    }, []);
+    }, [getSignal]);
 
     function resetOutputs() {
         setGenerated(null);
@@ -240,33 +246,42 @@ export function ElGamalDemo() {
     }
 
     async function verifyOnChain() {
-        if (!wallet || !generated) return;
+        if (!wallet || !generated || running) return;
+        const signal = getSignal();
         setRunning(true);
         setResult(null);
         setError(null);
         try {
             await ensureFunded(rpc, wallet, getClusterFromClusterId(clusterId) === 'localnet');
+            signal.throwIfAborted();
             const checks: ProofCheck[] = [];
             for (const proof of generated.proofs) {
+                signal.throwIfAborted();
                 const instructions = await buildInstructions(proof);
+                signal.throwIfAborted();
                 let signature: string;
                 let ok = true;
                 try {
                     signature = await signAndSend(instructions, wallet, { skipPreflight: true });
                 } catch (caught) {
+                    if (signal.aborted) return;
                     if (!(caught instanceof OnChainTransactionError)) throw caught;
                     signature = caught.signature;
                     ok = false;
                 }
-                const tx = await rpc
-                    .getTransaction(signature as Signature, {
-                        commitment: 'confirmed',
-                        encoding: 'json',
-                        maxSupportedTransactionVersion: 1,
-                    })
-                    .send();
+                signal.throwIfAborted();
+                const computeUnits = await optionalComputeUnits(
+                    rpc
+                        .getTransaction(signature as Signature, {
+                            commitment: 'confirmed',
+                            encoding: 'json',
+                            maxSupportedTransactionVersion: 1,
+                        })
+                        .send(),
+                );
+                signal.throwIfAborted();
                 checks.push({
-                    computeUnits: tx?.meta?.computeUnitsConsumed ?? null,
+                    computeUnits,
                     kind: proof.kind,
                     ok,
                     signature,
@@ -274,13 +289,14 @@ export function ElGamalDemo() {
             }
             setResult({ checks, ok: checks.every(check => check.ok) });
         } catch (caught) {
+            if (signal.aborted) return;
             if (caught instanceof InsufficientDemoFundsError) {
                 requestFunding({ address: caught.address, onFunded: () => void verifyOnChain() });
                 return;
             }
             setError(formatTransactionError(caught));
         } finally {
-            setRunning(false);
+            if (!signal.aborted) setRunning(false);
         }
     }
 
@@ -376,6 +392,7 @@ export function ElGamalDemo() {
                                         <Lock className="pointer-events-none absolute top-1/2 left-2 size-3.5 -translate-y-1/2 text-sand-1100" />
                                         <input
                                             className="block h-9 w-40 rounded-lg border border-foreground/30 bg-sand-100 pr-2 pl-7 font-berkeley-mono text-sm text-foreground outline-none focus-visible:ring-[3px] focus-visible:ring-ring/50"
+                                            disabled={running}
                                             inputMode="numeric"
                                             onChange={e => updateInput(setAmount, e.target.value)}
                                             value={amount}
@@ -385,6 +402,7 @@ export function ElGamalDemo() {
                                 <button
                                     aria-label="Cycle comparison operator"
                                     className="h-9 w-12 rounded-lg border border-input bg-background font-berkeley-mono text-sm text-foreground transition-colors hover:bg-sand-100"
+                                    disabled={running}
                                     onClick={cycleOp}
                                     type="button"
                                 >
@@ -394,12 +412,17 @@ export function ElGamalDemo() {
                                     <span className="text-xs font-medium text-sand-1100">Claimed number</span>
                                     <input
                                         className="mt-1 block h-9 w-40 rounded-lg border border-input bg-background px-2 text-sm outline-none focus-visible:ring-[3px] focus-visible:ring-ring/50"
+                                        disabled={running}
                                         inputMode="numeric"
                                         onChange={e => updateInput(setClaim, e.target.value)}
                                         value={claim}
                                     />
                                 </label>
-                                {!generated && <Button onClick={generate}>Encrypt &amp; generate proof</Button>}
+                                {!generated && (
+                                    <Button disabled={running} onClick={generate}>
+                                        Encrypt &amp; generate proof
+                                    </Button>
+                                )}
                             </div>
                             {generated && (
                                 <div className="space-y-2 rounded-lg border bg-background px-3 py-3 text-sm">

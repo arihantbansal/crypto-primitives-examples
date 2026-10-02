@@ -21,6 +21,7 @@ import { Connector, FlowDiagram, Stage, type StageState } from '@/components/flo
 import { useClusterConfig } from '@/hooks/use-cluster-config';
 import { useRpc } from '@/hooks/useRpc';
 import { ensureFunded, getDemoWallet, InsufficientDemoFundsError } from '@/lib/demo-wallet';
+import { useDemoSession } from '@/lib/demo-session';
 import {
     BALLOT_TALLY_ACCOUNT_SIZE,
     ballotTallyAddInstructionData,
@@ -31,6 +32,7 @@ import { getClusterFromClusterId, getSolanaExplorerAddressUrl, getSolanaExplorer
 import { base64ToBytes, bytesToHex, hexToBytes } from '@/lib/hex';
 import { getProgramAddress } from '@/lib/program';
 import { formatTransactionError } from '@/lib/transactionErrors';
+import { optionalComputeUnits } from '@/lib/transaction-metadata';
 
 type Vote = 'no' | 'stuffed' | 'yes';
 
@@ -64,6 +66,7 @@ export function BallotDemo() {
     const rpc = useRpc();
     const signAndSend = useWalletTransactionSignAndSend();
     const { id: clusterId } = useClusterConfig();
+    const { getSignal } = useDemoSession();
     const { dialog: fundingDialog, requestFunding } = useDemoWalletFunding();
 
     const [wallet, setWallet] = useState<KeyPairSigner | null>(null);
@@ -80,10 +83,13 @@ export function BallotDemo() {
     const [decrypting, setDecrypting] = useState(false);
 
     useEffect(() => {
+        const signal = getSignal();
         getDemoWallet()
-            .then(setWallet)
+            .then(value => {
+                if (!signal.aborted) setWallet(value);
+            })
             .catch(() => undefined);
-    }, []);
+    }, [getSignal]);
 
     function resetTally() {
         setOnChainTally(null);
@@ -160,55 +166,69 @@ export function BallotDemo() {
     }
 
     async function verifyOnChain() {
-        if (!wallet || !generated) return;
+        if (!wallet || !generated || running || tallying) return;
+        const signal = getSignal();
         setRunning(true);
         setResult(null);
         setError(null);
         try {
             await ensureFunded(rpc, wallet, getClusterFromClusterId(clusterId) === 'localnet');
+            signal.throwIfAborted();
             const checks: ProofCheck[] = [];
             for (const proofData of generated.proofChunks) {
+                signal.throwIfAborted();
                 const instructions = await verifyBatchedRangeProofU64({ payer: wallet, proofData, rpc });
+                signal.throwIfAborted();
                 let signature: string;
                 let ok = true;
                 try {
                     signature = await signAndSend(instructions, wallet, { skipPreflight: true });
                 } catch (caught) {
+                    if (signal.aborted) return;
                     if (!(caught instanceof OnChainTransactionError)) throw caught;
                     signature = caught.signature;
                     ok = false;
                 }
-                const tx = await rpc
-                    .getTransaction(signature as Signature, {
-                        commitment: 'confirmed',
-                        encoding: 'json',
-                        maxSupportedTransactionVersion: 1,
-                    })
-                    .send();
-                checks.push({ computeUnits: tx?.meta?.computeUnitsConsumed ?? null, ok, signature });
+                signal.throwIfAborted();
+                const computeUnits = await optionalComputeUnits(
+                    rpc
+                        .getTransaction(signature as Signature, {
+                            commitment: 'confirmed',
+                            encoding: 'json',
+                            maxSupportedTransactionVersion: 1,
+                        })
+                        .send(),
+                );
+                signal.throwIfAborted();
+                checks.push({ computeUnits, ok, signature });
             }
             setResult({ checks, ok: checks.every(check => check.ok) });
         } catch (caught) {
+            if (signal.aborted) return;
             if (caught instanceof InsufficientDemoFundsError) {
                 requestFunding({ address: caught.address, onFunded: () => void verifyOnChain() });
                 return;
             }
             setError(formatTransactionError(caught));
         } finally {
-            setRunning(false);
+            if (!signal.aborted) setRunning(false);
         }
     }
 
     async function tallyOnChain() {
-        if (!wallet || !generated) return;
+        if (!wallet || !generated || tallying || running) return;
+        const signal = getSignal();
         setTallying(true);
         setError(null);
         resetTally();
         try {
             await ensureFunded(rpc, wallet, getClusterFromClusterId(clusterId) === 'localnet');
+            signal.throwIfAborted();
             const space = BigInt(BALLOT_TALLY_ACCOUNT_SIZE);
             const lamports = await rpc.getMinimumBalanceForRentExemption(space).send();
+            signal.throwIfAborted();
             const account = await generateKeyPairSigner();
+            signal.throwIfAborted();
             await signAndSend(
                 [
                     getCreateAccountInstruction({
@@ -221,47 +241,54 @@ export function BallotDemo() {
                 ],
                 wallet,
             );
+            signal.throwIfAborted();
 
             for (const ballot of generated.ballotCiphertexts) {
+                signal.throwIfAborted();
                 const instruction: Instruction = {
                     accounts: [{ address: account.address, role: AccountRole.WRITABLE }],
                     data: ballotTallyAddInstructionData(ballot),
                     programAddress: getProgramAddress(),
                 };
                 await signAndSend([instruction], wallet);
+                signal.throwIfAborted();
             }
 
             const info = await rpc.getAccountInfo(account.address, { encoding: 'base64' }).send();
+            signal.throwIfAborted();
             if (!info.value) throw new Error('Tally account not found — try again in a moment');
             const tallyCiphertext = base64ToBytes(info.value.data[0]).slice(2, 2 + 64);
             setTallyAccount(account.address);
             setTallyCipher(tallyCiphertext);
             setOnChainTally(decryptTally(tallyCiphertext, tallyKeyInput));
         } catch (caught) {
+            if (signal.aborted) return;
             if (caught instanceof InsufficientDemoFundsError) {
                 requestFunding({ address: caught.address, onFunded: () => void tallyOnChain() });
                 return;
             }
             setError(formatTransactionError(caught));
         } finally {
-            setTallying(false);
+            if (!signal.aborted) setTallying(false);
         }
     }
 
     async function decryptFromChain() {
-        if (!tallyAccount) return;
+        if (!tallyAccount || decrypting || tallying) return;
+        const signal = getSignal();
         setDecrypting(true);
         setError(null);
         try {
             const info = await rpc.getAccountInfo(tallyAccount, { encoding: 'base64' }).send();
+            signal.throwIfAborted();
             if (!info.value) throw new Error('Tally account not found — try again in a moment');
             const tallyCiphertext = base64ToBytes(info.value.data[0]).slice(2, 2 + 64);
             setTallyCipher(tallyCiphertext);
             setOnChainTally(decryptTally(tallyCiphertext, tallyKeyInput));
         } catch (caught) {
-            setError(formatTransactionError(caught));
+            if (!signal.aborted) setError(formatTransactionError(caught));
         } finally {
-            setDecrypting(false);
+            if (!signal.aborted) setDecrypting(false);
         }
     }
 
@@ -349,7 +376,13 @@ export function BallotDemo() {
                     value={tallyKeyInput}
                 />
             </label>
-            <Button loading={decrypting} onClick={() => void decryptFromChain()} size="sm" variant="secondary">
+            <Button
+                disabled={tallying || decrypting}
+                loading={decrypting}
+                onClick={() => void decryptFromChain()}
+                size="sm"
+                variant="secondary"
+            >
                 Fetch &amp; decrypt the on-chain tally
             </Button>
             {onChainTally != null ? (
@@ -434,6 +467,7 @@ export function BallotDemo() {
                                                   : 'bg-destructive/10 text-destructive')
                                         }
                                         key={i}
+                                        disabled={running || tallying}
                                         onClick={() => cycleVote(i)}
                                         type="button"
                                     >
@@ -441,7 +475,11 @@ export function BallotDemo() {
                                     </button>
                                 ))}
                             </div>
-                            {!generated && <Button onClick={castBallots}>Cast encrypted ballots</Button>}
+                            {!generated && (
+                                <Button disabled={running || tallying} onClick={castBallots}>
+                                    Cast encrypted ballots
+                                </Button>
+                            )}
                             {generated && (
                                 <div className="space-y-2 rounded-lg border bg-background px-3 py-3 text-sm">
                                     <div className="text-sand-1100">
@@ -480,7 +518,7 @@ export function BallotDemo() {
                     actions={
                         <div className="space-y-3">
                             <Button
-                                disabled={running || !wallet || !generated}
+                                disabled={running || tallying || !wallet || !generated}
                                 loading={running}
                                 onClick={() => void verifyOnChain()}
                             >
@@ -507,7 +545,7 @@ export function BallotDemo() {
                     actions={
                         <div className="space-y-3">
                             <Button
-                                disabled={tallying || !wallet || !result}
+                                disabled={running || tallying || !wallet || !result}
                                 loading={tallying}
                                 onClick={() => void tallyOnChain()}
                             >

@@ -32,12 +32,14 @@ import {
     signMessage,
     verifyInstructionData,
 } from '@/lib/bn254-bls';
-import { clearDemoState, loadDemoState, saveDemoState } from '@/lib/demo-storage';
+import { clearDemoState, demoStorageKey, loadDemoState, saveDemoState } from '@/lib/demo-storage';
+import { useDemoSession } from '@/lib/demo-session';
 import { ensureFunded, getDemoWallet, InsufficientDemoFundsError } from '@/lib/demo-wallet';
 import { getClusterFromClusterId, getSolanaExplorerUrl } from '@/lib/explorer';
 import { base64ToBytes } from '@/lib/hex';
 import { getProgramAddress } from '@/lib/program';
 import { formatTransactionError } from '@/lib/transactionErrors';
+import { optionalComputeUnits } from '@/lib/transaction-metadata';
 import { ellipsify } from '@/lib/utils';
 
 type Phase = 'creating' | 'generating' | 'idle' | 'keys' | 'ready' | 'verifying';
@@ -61,7 +63,8 @@ interface StoredMultisig {
 export function MultisigDemo() {
     const rpc = useRpc();
     const signAndSend = useWalletTransactionSignAndSend();
-    const { id: clusterId } = useClusterConfig();
+    const { id: clusterId, url: endpoint } = useClusterConfig();
+    const { getSignal } = useDemoSession();
     const { dialog: fundingDialog, requestFunding } = useDemoWalletFunding();
 
     const [wallet, setWallet] = useState<KeyPairSigner | null>(null);
@@ -76,27 +79,30 @@ export function MultisigDemo() {
     const [error, setError] = useState<string | null>(null);
 
     const memberSet = useRef<MemberSet | null>(null);
-    const storageKey = `crypto-primitives-multisig-demo:${clusterId}`;
+    const storageKey = demoStorageKey('multisig', clusterId, endpoint);
 
     useEffect(() => {
+        const signal = getSignal();
         getDemoWallet()
-            .then(setWallet)
+            .then(value => {
+                if (!signal.aborted) setWallet(value);
+            })
             .catch(() => undefined);
-    }, []);
+    }, [getSignal]);
 
     useEffect(() => {
         const stored = loadDemoState<StoredMultisig>(storageKey);
         if (!stored || memberSet.current) return;
-        let cancelled = false;
+        const signal = getSignal();
         (async () => {
             const info = await rpc.getAccountInfo(stored.multisig as Address, { encoding: 'base64' }).send();
-            if (cancelled) return;
+            if (signal.aborted) return;
             if (!info.value) {
                 clearDemoState(storageKey);
                 return;
             }
             const set = await restoreMembers(stored.secrets);
-            if (cancelled) return;
+            if (signal.aborted) return;
             memberSet.current = set;
             setMembers(set.pubkeys);
             setMemberCount(set.pubkeys.length);
@@ -105,10 +111,7 @@ export function MultisigDemo() {
             setMultisig(stored.multisig as Address);
             setPhase('ready');
         })().catch(() => undefined);
-        return () => {
-            cancelled = true;
-        };
-    }, [rpc, storageKey]);
+    }, [getSignal, rpc, storageKey]);
 
     useEffect(() => {
         if (!multisig || !memberSet.current) return;
@@ -120,13 +123,16 @@ export function MultisigDemo() {
 
     async function createKeys() {
         if (!wallet) return;
+        const signal = getSignal();
         setPhase('generating');
         setError(null);
         setResult(null);
         try {
             await ensureFunded(rpc, wallet, getClusterFromClusterId(clusterId) === 'localnet');
+            if (signal.aborted) return;
 
             const set = await generateMembers(memberCount);
+            if (signal.aborted) return;
             memberSet.current = set;
             setMembers(set.pubkeys);
             setSigners(new Set(set.pubkeys.map((_, i) => i)));
@@ -134,6 +140,7 @@ export function MultisigDemo() {
             setMultisig(null);
             setPhase('keys');
         } catch (caught) {
+            if (signal.aborted) return;
             if (caught instanceof InsufficientDemoFundsError) {
                 requestFunding({ address: caught.address, onFunded: () => void createKeys() });
                 setPhase('idle');
@@ -146,18 +153,22 @@ export function MultisigDemo() {
 
     async function register() {
         if (!wallet || !memberSet.current) return;
+        const signal = getSignal();
         setPhase('creating');
         setError(null);
         setResult(null);
         setMultisig(null);
         try {
             await ensureFunded(rpc, wallet, getClusterFromClusterId(clusterId) === 'localnet');
+            if (signal.aborted) return;
 
             const set = memberSet.current;
             const count = set.pubkeys.length;
             const space = BigInt(2 + count * G2_POINT_BYTES);
             const lamports = await rpc.getMinimumBalanceForRentExemption(space).send();
+            if (signal.aborted) return;
             const account = await generateKeyPairSigner();
+            if (signal.aborted) return;
             await signAndSend(
                 [
                     getCreateAccountInstruction({
@@ -170,10 +181,12 @@ export function MultisigDemo() {
                 ],
                 wallet,
             );
+            if (signal.aborted) return;
 
             const total = Math.ceil(count / MAX_KEYS_PER_TX);
             setProgress({ done: 0, total });
             for (let i = 0; i < count; i += MAX_KEYS_PER_TX) {
+                if (signal.aborted) return;
                 const chunk = set.pubkeys.slice(i, i + MAX_KEYS_PER_TX);
                 const instruction: Instruction = {
                     accounts: [{ address: account.address, role: AccountRole.WRITABLE }],
@@ -181,12 +194,14 @@ export function MultisigDemo() {
                     programAddress: getProgramAddress(),
                 };
                 await signAndSend([instruction], wallet);
+                if (signal.aborted) return;
                 setProgress({ done: Math.floor(i / MAX_KEYS_PER_TX) + 1, total });
             }
 
             setMultisig(account.address);
             setPhase('ready');
         } catch (caught) {
+            if (signal.aborted) return;
             if (caught instanceof InsufficientDemoFundsError) {
                 requestFunding({ address: caught.address, onFunded: () => void register() });
                 setPhase('keys');
@@ -198,6 +213,7 @@ export function MultisigDemo() {
     }
 
     function toggleSigner(index: number) {
+        setResult(null);
         setSigners(prev => {
             const next = new Set(prev);
             if (next.has(index)) next.delete(index);
@@ -208,12 +224,14 @@ export function MultisigDemo() {
 
     async function verify() {
         if (!wallet || !multisig || !memberSet.current) return;
+        const signal = getSignal();
         setPhase('verifying');
         setError(null);
         setResult(null);
         try {
             const signerIndices = Array.from(signers).sort((a, b) => a - b);
             const aggregate = await signMessage(memberSet.current, MESSAGE, signerIndices);
+            if (signal.aborted) return;
             const instruction: Instruction = {
                 accounts: [{ address: multisig, role: AccountRole.READONLY }],
                 data: verifyInstructionData(aggregate),
@@ -224,31 +242,45 @@ export function MultisigDemo() {
             try {
                 signature = await signAndSend([instruction], wallet, { skipPreflight: true });
             } catch (caught) {
+                if (signal.aborted) return;
                 if (!(caught instanceof OnChainTransactionError)) throw caught;
                 signature = caught.signature;
                 ok = false;
             }
-            const tx = await rpc
-                .getTransaction(signature as Signature, {
-                    commitment: 'confirmed',
-                    encoding: 'json',
-                    maxSupportedTransactionVersion: 1,
-                })
-                .send();
-            const account = await rpc.getAccountInfo(multisig, { encoding: 'base64' }).send();
-            const storedKeys = account.value ? parseStoredPubkeys(base64ToBytes(account.value.data[0])) : [];
+            if (signal.aborted) return;
+            const computeUnits = await optionalComputeUnits(
+                rpc
+                    .getTransaction(signature as Signature, {
+                        commitment: 'confirmed',
+                        encoding: 'json',
+                        maxSupportedTransactionVersion: 1,
+                    })
+                    .send(),
+            );
+            if (signal.aborted) return;
+            const account = await rpc
+                .getAccountInfo(multisig, { encoding: 'base64' })
+                .send()
+                .catch(() => null);
+            if (signal.aborted) return;
+            const storedKeys = account?.value ? parseStoredPubkeys(base64ToBytes(account.value.data[0])) : [];
+            const signerAggregateKey = await aggregatePubkeysHex(signerIndices.map(i => memberSet.current!.pubkeys[i]));
+            if (signal.aborted) return;
+            const storedAggregateKey = await aggregatePubkeysHex(storedKeys);
+            if (signal.aborted) return;
             setResult({
-                computeUnits: tx?.meta?.computeUnitsConsumed ?? null,
+                computeUnits,
                 ok,
                 signature,
-                signerAggregateKey: await aggregatePubkeysHex(signerIndices.map(i => memberSet.current!.pubkeys[i])),
+                signerAggregateKey,
                 signerCount: signers.size,
-                storedAggregateKey: await aggregatePubkeysHex(storedKeys),
+                storedAggregateKey,
             });
         } catch (caught) {
+            if (signal.aborted) return;
             setError(formatTransactionError(caught));
         } finally {
-            setPhase('ready');
+            if (!signal.aborted) setPhase('ready');
         }
     }
 
