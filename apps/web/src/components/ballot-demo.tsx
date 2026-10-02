@@ -81,6 +81,7 @@ export function BallotDemo() {
     const [onChainTally, setOnChainTally] = useState<number | null>(null);
     const [tallying, setTallying] = useState(false);
     const [decrypting, setDecrypting] = useState(false);
+    const busy = running || tallying || decrypting;
 
     useEffect(() => {
         const signal = getSignal();
@@ -104,6 +105,7 @@ export function BallotDemo() {
     }
 
     function cycleVote(index: number) {
+        if (busy) return;
         setVotes(prev => prev.map((v, i) => (i === index ? VOTE_CYCLE[(VOTE_CYCLE.indexOf(v) + 1) % 3] : v)));
         setGenerated(null);
         setResult(null);
@@ -112,6 +114,7 @@ export function BallotDemo() {
     }
 
     function castBallots() {
+        if (busy) return;
         setError(null);
         setResult(null);
         setGenerated(null);
@@ -166,7 +169,7 @@ export function BallotDemo() {
     }
 
     async function verifyOnChain() {
-        if (!wallet || !generated || running || tallying) return;
+        if (!wallet || !generated || busy) return;
         const signal = getSignal();
         setRunning(true);
         setResult(null);
@@ -216,7 +219,7 @@ export function BallotDemo() {
     }
 
     async function tallyOnChain() {
-        if (!wallet || !generated || tallying || running) return;
+        if (!wallet || !generated || busy) return;
         const signal = getSignal();
         setTallying(true);
         setError(null);
@@ -274,7 +277,7 @@ export function BallotDemo() {
     }
 
     async function decryptFromChain() {
-        if (!tallyAccount || decrypting || tallying) return;
+        if (!tallyAccount || busy) return;
         const signal = getSignal();
         setDecrypting(true);
         setError(null);
@@ -371,13 +374,14 @@ export function BallotDemo() {
                 </span>
                 <input
                     className="mt-1 block w-full rounded-lg border border-input bg-background px-2 py-1 font-berkeley-mono text-xs text-foreground outline-none focus-visible:ring-[3px] focus-visible:ring-ring/50"
+                    disabled={busy}
                     onChange={e => setTallyKeyInput(e.target.value)}
                     spellCheck={false}
                     value={tallyKeyInput}
                 />
             </label>
             <Button
-                disabled={tallying || decrypting}
+                disabled={busy}
                 loading={decrypting}
                 onClick={() => void decryptFromChain()}
                 size="sm"
@@ -467,7 +471,7 @@ export function BallotDemo() {
                                                   : 'bg-destructive/10 text-destructive')
                                         }
                                         key={i}
-                                        disabled={running || tallying}
+                                        disabled={busy}
                                         onClick={() => cycleVote(i)}
                                         type="button"
                                     >
@@ -476,7 +480,7 @@ export function BallotDemo() {
                                 ))}
                             </div>
                             {!generated && (
-                                <Button disabled={running || tallying} onClick={castBallots}>
+                                <Button disabled={busy} onClick={castBallots}>
                                     Cast encrypted ballots
                                 </Button>
                             )}
@@ -518,7 +522,7 @@ export function BallotDemo() {
                     actions={
                         <div className="space-y-3">
                             <Button
-                                disabled={running || tallying || !wallet || !generated}
+                                disabled={busy || !wallet || !generated}
                                 loading={running}
                                 onClick={() => void verifyOnChain()}
                             >
@@ -545,7 +549,7 @@ export function BallotDemo() {
                     actions={
                         <div className="space-y-3">
                             <Button
-                                disabled={running || tallying || !wallet || !result}
+                                disabled={busy || !wallet || !result}
                                 loading={tallying}
                                 onClick={() => void tallyOnChain()}
                             >
