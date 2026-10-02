@@ -13,6 +13,7 @@ import {
 import { useCallback } from 'react';
 
 import { useRpc } from '@/hooks/useRpc';
+import { useDemoSession } from '@/lib/demo-session';
 
 const POLL_INTERVAL_MS = 500;
 const MAX_POLLS = 60;
@@ -38,6 +39,7 @@ export class OnChainTransactionError extends Error {
  */
 export function useWalletTransactionSignAndSend() {
     const rpc = useRpc();
+    const { getSignal } = useDemoSession();
 
     return useCallback(
         async (
@@ -45,7 +47,10 @@ export function useWalletTransactionSignAndSend() {
             signer: TransactionSigner,
             opts?: { skipPreflight?: boolean },
         ): Promise<string> => {
+            const signal = getSignal();
+            signal.throwIfAborted();
             const { value: latestBlockhash } = await rpc.getLatestBlockhash().send();
+            signal.throwIfAborted();
 
             const txMessage = pipe(
                 createTransactionMessage({ version: 0 }),
@@ -55,6 +60,7 @@ export function useWalletTransactionSignAndSend() {
             );
 
             const signedTx = await signTransactionMessageWithSigners(txMessage);
+            signal.throwIfAborted();
             const signature = getSignatureFromTransaction(signedTx);
 
             await rpc
@@ -66,7 +72,9 @@ export function useWalletTransactionSignAndSend() {
                 .send();
 
             for (let i = 0; i < MAX_POLLS; i++) {
+                signal.throwIfAborted();
                 const { value } = await rpc.getSignatureStatuses([signature]).send();
+                signal.throwIfAborted();
                 const status = value[0];
                 if (status?.err) {
                     throw new OnChainTransactionError(signature, status.err);
@@ -78,6 +86,6 @@ export function useWalletTransactionSignAndSend() {
             }
             throw new Error('Transaction was not confirmed in time');
         },
-        [rpc],
+        [getSignal, rpc],
     );
 }

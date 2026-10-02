@@ -11,6 +11,7 @@
         "format": "prettier --write .",
         "format:check": "prettier --check .",
         "lint": "eslint .",
+        "test:web": "tsx --test apps/web/tests/*.test.ts",
         "lint:fix": "eslint . --fix"
     },
     "devDependencies": {
