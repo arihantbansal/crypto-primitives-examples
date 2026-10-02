@@ -234,7 +234,16 @@ export function Overview() {
                                                 <div className="space-y-2 pl-5 text-sm">
                                                     <dl className="grid grid-cols-[auto_1fr] gap-x-2 gap-y-1 text-xs sm:hidden">
                                                         <dt className="text-muted-foreground">SIMD</dt>
-                                                        <dd>{row.simd}</dd>
+                                                        <dd>
+                                                            <a
+                                                                className="underline underline-offset-2"
+                                                                href={row.simdUrl}
+                                                                rel="noopener noreferrer"
+                                                                target="_blank"
+                                                            >
+                                                                {row.simd}
+                                                            </a>
+                                                        </dd>
                                                         <dt className="text-muted-foreground">Kind</dt>
                                                         <dd>{row.kind}</dd>
                                                         <dt className="text-muted-foreground">Encoding</dt>
