@@ -1,22 +1,24 @@
 # Crypto Primitives Examples
 
-Runnable, interactive demos for the activated BN254, BLS12-381, and ZK ElGamal features, plus a status page for the pending SHA-512 syscall proposal — what each one does, how they differ, and what they make newly possible on Solana.
+Runnable, interactive demos for the activated BN254, BLS12-381, and ZK ElGamal features, plus a status page for the SHA-512 syscall proposal. It explains what each primitive does, how they differ, and what they make possible on Solana.
 
 > [!WARNING]
 > This is **educational example code**, not a production library. The program has **not been audited**, the demos cut corners for clarity (in-browser throwaway keys, simplified flows), and nothing here is meant to be deployed as-is or relied on for real value. Use it to learn the primitives, then build your own.
 
 ## Overview
 
-This repo covers four Solana cryptography surfaces: three activated features exercised through demos, and one pending SHA-512 syscall proposal tracked in the feature-gate registry.
+This repo covers three Solana cryptography features exercised through demos and a SHA-512 syscall proposal tracked in the feature-gate registry. This repo does not implement the SHA-512 syscall, so it has no transaction demo. The `/sha512` page reads its feature-gate status from the registry at runtime.
 
-| Primitive                | SIMD                                                                                                                        | Kind                                  | Security       | Operations                   | Status                         |
-| ------------------------ | --------------------------------------------------------------------------------------------------------------------------- | ------------------------------------- | -------------- | ---------------------------- | ------------------------------ |
-| alt_bn128 G2             | [0302](https://github.com/solana-foundation/solana-improvement-documents/blob/main/proposals/0302-bn254-g2-syscalls.md)     | syscall (`sol_alt_bn128_group_op`)    | ~100-bit       | G2 add, scalar-mul           | mainnet epoch 985              |
-| BLS12-381                | [0388](https://github.com/solana-foundation/solana-improvement-documents/blob/main/proposals/0388-bls12-381-syscalls.md)    | syscall (`sol_curve_group_op`)        | 128-bit        | G1/G2 add, sub, scalar-mul   | mainnet epoch 986              |
-| ZK ElGamal Proof Program | [0153](https://github.com/solana-foundation/solana-improvement-documents/blob/main/proposals/0153-elgamal-proof-program.md) | native program (`ZkE1Gama1Proof111…`) | proof-specific | verify zero-knowledge proofs | mainnet epoch 731              |
-| SHA-512                  | [0512](https://github.com/solana-foundation/solana-improvement-documents/blob/main/proposals/0512-sha512-syscall.md)        | proposed syscall (`sol_sha512`)       | hash-specific  | SHA-512 hash, 64-byte output | pending; no cluster activation |
+The status epochs in the table are a snapshot checked on 2026-10-02.
 
-The two curve families add point arithmetic over [`alt_bn128`](https://github.com/solana-foundation/solana-improvement-documents/blob/main/proposals/0302-bn254-g2-syscalls.md) (BN254) and [BLS12-381](https://github.com/solana-foundation/solana-improvement-documents/blob/main/proposals/0388-bls12-381-syscalls.md) — the building blocks this repo uses for BLS-style signature aggregation demos. The ZK ElGamal Proof program is a native verifier for zero-knowledge proofs over encrypted values; it underpins Token-2022 confidential transfers. SIMD-0512 proposes `sol_sha512` with the same interface as Solana's existing hash syscalls, but it is not activated on any cluster yet.
+| Primitive                | SIMD                                                                                                                        | Kind                                  | Security       | Operations                   | Status                                                 |
+| ------------------------ | --------------------------------------------------------------------------------------------------------------------------- | ------------------------------------- | -------------- | ---------------------------- | ------------------------------------------------------ |
+| alt_bn128 G2             | [0302](https://github.com/solana-foundation/solana-improvement-documents/blob/main/proposals/0302-bn254-g2-syscalls.md)     | syscall (`sol_alt_bn128_group_op`)    | ~100-bit       | G2 add, scalar-mul           | mainnet epoch 985                                      |
+| BLS12-381                | [0388](https://github.com/solana-foundation/solana-improvement-documents/blob/main/proposals/0388-bls12-381-syscalls.md)    | syscall (`sol_curve_group_op`)        | 128-bit        | G1/G2 add, sub, scalar-mul   | mainnet epoch 986                                      |
+| ZK ElGamal Proof Program | [0153](https://github.com/solana-foundation/solana-improvement-documents/blob/main/proposals/0153-elgamal-proof-program.md) | native program (`ZkE1Gama1Proof111…`) | proof-specific | verify zero-knowledge proofs | mainnet epoch 731                                      |
+| SHA-512                  | [0512](https://github.com/solana-foundation/solana-improvement-documents/blob/main/proposals/0512-sha512-syscall.md)        | proposed syscall (`sol_sha512`)       | hash-specific  | SHA-512 hash, 64-byte output | testnet epoch 977; devnet epoch 1092; no mainnet epoch |
+
+The two curve families add point arithmetic over [`alt_bn128`](https://github.com/solana-foundation/solana-improvement-documents/blob/main/proposals/0302-bn254-g2-syscalls.md) (BN254) and [BLS12-381](https://github.com/solana-foundation/solana-improvement-documents/blob/main/proposals/0388-bls12-381-syscalls.md) — the building blocks this repo uses for BLS-style signature aggregation demos. The ZK ElGamal Proof program is a native verifier for zero-knowledge proofs over encrypted values; it underpins Token-2022 confidential transfers. SIMD-0512 proposes `sol_sha512` with the same interface as Solana's existing hash syscalls.
 
 This repository contains:
 
@@ -34,22 +36,22 @@ The web app leads each primitive with a use case, not an opcode.
 
 ### alt_bn128 G2 → on-chain BLS multisig (`/altbn128`)
 
-Register a set of members on-chain, then prove they all approved a message with a single aggregate signature. The program folds every stored public key with G2 addition and runs one pairing check — it passes only if **every** member signed. Toggle members off and the aggregate no longer matches the registered set; the verify lands on-chain and is rejected. The demo shows the aggregate key the program folds from the stored keys next to the key your selected signers represent, so a mismatch is visible. **Fully verified on-chain.**
+Store a set of public keys on-chain, then verify a caller-supplied aggregate signature against a caller-supplied message hash with one pairing check. It passes only when the signature matches the aggregate of the stored keys. The demo lets you toggle which keys sign; leaving one out makes the aggregate fail verification. **Signature verification runs on-chain.** This example account has no authority or membership checks: the instruction does not restrict who can append keys. The program also does not bind the hash to an application message or enforce application-level approval rules.
 
 ### BLS12-381 → aggregate-key registry (`/bls12381`)
 
-The program keeps one aggregate BLS public key on-chain. Adding a member folds their key in with G2 addition; removing takes it back out with G2 subtraction — the operation this repo does not expose for `alt_bn128`. Pick who signs and verify the aggregate signature against the on-chain key, which only matches when the signers are exactly the current members. **Verification runs off-chain in this demo** — the checked-in program wraps BLS12-381 group add/sub/mul, so its on-chain role is maintaining the aggregate key.
+The program keeps one aggregate BLS public key on-chain. Adding a supplied key folds it in with G2 addition; removing a supplied key takes it back out with G2 subtraction — the operation this repo does not expose for `alt_bn128`. The demo verifies the selected signers' signature against the stored aggregate key off-chain. This example registry does not track individual members or check authority, membership, or whether a key was previously added before subtracting it.
 
 ### ZK ElGamal → encrypted-value proofs (`/elgamal`)
 
 Two tabs, both generating proofs client-side (WebAssembly, `@solana/zk-sdk`) and submitting them to the native verifier:
 
 - **Compare a hidden number** — encrypt a value, then prove on-chain how it compares (`==`, `>`, `<`) to a public number without revealing it. `==` is one zero-ciphertext proof; `>` / `<` add a Bulletproof range proof plus an equality proof.
-- **Private ballot** — voters encrypt 0/1 ballots; one batched range proof per five voters shows each ballot is valid, and the encrypted ballots are summed homomorphically so only the total is ever decrypted. A stuffed ballot is caught on-chain.
+- **Private ballot** — the client creates 0/1 encrypted ballots and a batched range proof for them; the proof verifier checks that proof, and a separate instruction adds supplied ciphertexts to an encrypted total. The tally instruction does not check the range proof or limit each contribution to 0/1, so the demo's proof is not a general guard against stuffed ballots.
 
-### SHA-512 → pending hash syscall (`/sha512`)
+### SHA-512 → syscall proposal and feature-gate status (`/sha512`)
 
-SIMD-0512 proposes `sol_sha512`, a native SHA-512 syscall with the same slice-based interface as `sol_sha256`, `sol_keccak256`, and `sol_blake3`. The feature is listed in the registry with no testnet, devnet, or mainnet activation epoch, so the web app has a status page rather than a live transaction demo.
+SIMD-0512 proposes `sol_sha512`, a native SHA-512 syscall with the same slice-based interface as `sol_sha256`, `sol_keccak256`, and `sol_blake3`. The web app shows its feature-gate registry status, but this repository does not implement the syscall and therefore has no transaction demo.
 
 ## Program
 
@@ -57,17 +59,18 @@ SIMD-0512 proposes `sol_sha512`, a native SHA-512 syscall with the same slice-ba
 EgJAPMy5V2j442dTGFRqT5ZtPCWtg6BEbEo2QzkExYyw
 ```
 
-The program is a thin wrapper over the active syscalls plus a few stateful accounts, with 14 instructions. It does not wrap the pending SHA-512 syscall.
+The program is a thin wrapper over the active syscalls plus a few stateful accounts, with 15 instructions. It does not wrap the SHA-512 syscall.
 
-| Discriminator | Instruction                             | Notes                                                 |
-| ------------- | --------------------------------------- | ----------------------------------------------------- |
-| 0             | `Noop`                                  | Pipeline / warm-up                                    |
-| 1, 2          | `AltBn128G2Add` / `AltBn128G2Mul`       | `sol_alt_bn128_group_op` (BN254 G2)                   |
-| 3–5           | `Bls12381G1Add` / `Sub` / `Mul`         | `sol_curve_group_op`, curve G1                        |
-| 6–8           | `Bls12381G2Add` / `Sub` / `Mul`         | `sol_curve_group_op`, curve G2                        |
-| 9             | `Bls254AggregateVerify`                 | Folds G2 pubkeys, runs one pairing check              |
-| 10, 11        | `MultisigAddSigners` / `MultisigVerify` | Stateful account; all members must sign               |
-| 12, 13        | `BlsRegistryAdd` / `BlsRegistryRemove`  | Stateful account; G2 add / sub on a running aggregate |
+| Discriminator | Instruction                             | Notes                                                                              |
+| ------------- | --------------------------------------- | ---------------------------------------------------------------------------------- |
+| 0             | `Noop`                                  | Pipeline / warm-up                                                                 |
+| 1, 2          | `AltBn128G2Add` / `AltBn128G2Mul`       | `sol_alt_bn128_group_op` (BN254 G2)                                                |
+| 3–5           | `Bls12381G1Add` / `Sub` / `Mul`         | `sol_curve_group_op`, curve G1                                                     |
+| 6–8           | `Bls12381G2Add` / `Sub` / `Mul`         | `sol_curve_group_op`, curve G2                                                     |
+| 9             | `Bls254AggregateVerify`                 | Folds G2 pubkeys, runs one pairing check                                           |
+| 10, 11        | `MultisigAddSigners` / `MultisigVerify` | Stateful account; all members must sign                                            |
+| 12, 13        | `BlsRegistryAdd` / `BlsRegistryRemove`  | Stateful account; G2 add / sub on a running aggregate                              |
+| 14            | `BallotTallyAdd`                        | Adds a supplied encrypted ballot to a running tally; does not verify a range proof |
 
 Compute units, measured on an agave 4.0 runtime:
 
@@ -122,11 +125,11 @@ just localnet     # fresh validator + deploy + fund the local wallet (holds port
 just web-dev      # vite dev server → http://localhost:5173
 ```
 
-Open http://localhost:5173. In dev the cluster defaults to Localnet and the alt_bn128 and BLS12-381 demos use a pre-funded local wallet — no browser wallet needed. The ZK ElGamal demo requires a connected wallet to pay the proof-verification fee.
+Open http://localhost:5173. During local development, the app defaults to Localnet; on a hosted app, select Devnet. All transaction demos sign with an in-browser burner wallet. Localnet funds that wallet automatically; on Devnet, connect a wallet to fund it when prompted. The connected wallet funds the burner and does not sign each demo transaction. Custom RPC endpoints are accepted only when they resolve to Devnet.
 
 ## Prerequisites
 
-The BN254 G2 and BLS12-381 syscalls used by this program require Agave 4.0, and the older `cargo-build-sbf` cannot parse the 4.0 dependency tree, so the toolchain version matters. SHA-512 is tracked in the feature-gate registry, is not activated on any cluster, and is not exercised by this repo.
+The BN254 G2 and BLS12-381 syscalls used by this program require Agave 4.0, and the older `cargo-build-sbf` cannot parse the 4.0 dependency tree, so the toolchain version matters. SHA-512 is tracked in the feature-gate registry but is not implemented or exercised by this repo.
 
 | Tool      | Version | Notes                                                     |
 | --------- | ------- | --------------------------------------------------------- |
@@ -200,9 +203,9 @@ A Vite + React 19 single-page app under `apps/web/`.
 | `/altbn128` | alt_bn128 G2 → on-chain BLS multisig              |
 | `/bls12381` | BLS12-381 → aggregate-key registry                |
 | `/elgamal`  | ZK ElGamal → encrypted-value proofs (2 tabs)      |
-| `/sha512`   | SHA-512 → pending syscall proposal                |
+| `/sha512`   | SHA-512 → proposal and feature-gate status        |
 
-A network selector supports Localnet (dev), Devnet, Testnet, and Mainnet, plus a custom RPC override (the endpoint's genesis hash auto-detects the cluster).
+For transaction demos, use Localnet during local development or Devnet in the hosted app. Custom RPC endpoints are restricted to Devnet; a network selector may expose other clusters, but the demos are not documented as supported there.
 
 ## CI Pipeline
 

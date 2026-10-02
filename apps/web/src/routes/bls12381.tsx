@@ -18,6 +18,10 @@ export function Bls12381() {
                         unlike the BN254 path used in this repo, can subtract a provided member key just as cheaply — so
                         signers can join or leave at any time.
                     </p>
+                    <p className="text-sm text-muted-foreground">
+                        This example registry accepts caller-supplied keys without authority or membership checks;
+                        removing a key does not require it to have been added before.
+                    </p>
                     <p className="text-muted-foreground">
                         BLS12-381 is the curve behind Ethereum consensus and a newer, stronger cousin of BN254. The
                         syscalls work across both of its point groups,{' '}

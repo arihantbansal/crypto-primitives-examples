@@ -1,8 +1,18 @@
 import { ExternalLink } from 'lucide-react';
 
 import { HashTerm, SyscallTerm } from '@/components/glossary-term';
+import { featureGateStatus, useFeatureGates } from '@/hooks/use-feature-gates';
+
+const SHA512_FEATURE_KEY = 's512oDwgx8hjMnaQjXfqqrZroVj4HvC6TkN3iSSWXCh';
 
 export function Sha512() {
+    const { data: featureGates, isError, isPending } = useFeatureGates();
+    const activation = isPending
+        ? 'Loading…'
+        : isError
+          ? 'Unavailable'
+          : featureGateStatus(featureGates?.find(gate => gate.key === SHA512_FEATURE_KEY));
+
     return (
         <div className="space-y-8">
             <h1 className="text-3xl font-semibold tracking-tight text-balance text-foreground">
@@ -46,14 +56,10 @@ export function Sha512() {
                 </div>
                 <div className="lg:col-span-2">
                     <div className="space-y-3 rounded-xl border border-dashed bg-card p-6">
-                        <span className="inline-flex items-center rounded-full bg-sand-200 px-2.5 py-0.5 text-xs font-medium text-sand-1100">
-                            Coming soon
-                        </span>
-                        <h2 className="text-lg font-semibold text-foreground">No live demo yet</h2>
+                        <h2 className="text-lg font-semibold text-foreground">No demo in this repository</h2>
                         <p className="text-sm text-muted-foreground">
-                            <code className="font-berkeley-mono text-xs text-foreground">sol_sha512</code> is proposed
-                            in SIMD-0512 and tracked in the feature-gate registry, but it is not activated on any
-                            cluster yet.
+                            Feature-gate registry status: {activation}. The repository does not implement the syscall,
+                            so this page explains the proposal instead of sending a transaction.
                         </p>
                     </div>
                 </div>

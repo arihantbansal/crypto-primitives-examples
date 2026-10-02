@@ -17,6 +17,10 @@ export function AltBn128() {
                         already supports — but the piece needed to combine public keys this way was missing. This{' '}
                         <SyscallTerm>syscall</SyscallTerm> adds it.
                     </p>
+                    <p className="text-sm text-muted-foreground">
+                        In this example, the verifier checks the hash supplied with the signature. It does not bind that
+                        hash to an application message or enforce who may add keys to the example account.
+                    </p>
                     <p className="text-muted-foreground">Here are some examples of what is now possible on Solana:</p>
                     <ul className="list-disc space-y-1 pl-5 text-sm text-muted-foreground">
                         <li>

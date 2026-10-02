@@ -1,14 +1,14 @@
 import { Fragment, useState } from 'react';
-import { useQuery } from '@tanstack/react-query';
 import { Link } from 'react-router';
 import { ArrowRight, ChevronRight, Info } from 'lucide-react';
 
 import { PairingTerm, SyscallTerm } from '@/components/glossary-term';
 import { Tooltip, TooltipContent, TooltipTrigger } from '@/components/ui/tooltip';
+import { featureGateStatus, useFeatureGates } from '@/hooks/use-feature-gates';
 import { cn } from '@/lib/utils';
 
 interface PrimitiveRow {
-    comingSoon?: boolean;
+    actionLabel?: string;
     encoding: string;
     example: string;
     featureKey: string;
@@ -18,42 +18,11 @@ interface PrimitiveRow {
     security: string;
     simd: string;
     simdUrl: string;
-    status: string;
     to?: string;
     uses: string[];
 }
 
 const SIMD_BASE = 'https://github.com/solana-foundation/solana-improvement-documents/blob/main/proposals/';
-
-const FEATURE_GATES_URL =
-    'https://raw.githubusercontent.com/solana-foundation/explorer/master/app/entities/feature-gate/feature-gates.json';
-
-interface FeatureGateEntry {
-    devnet_activation_epoch: number | null;
-    key: string;
-    mainnet_activation_epoch: number | null;
-    testnet_activation_epoch: number | null;
-}
-
-function activationStatus(entry: FeatureGateEntry | undefined): string | null {
-    if (!entry) return null;
-    if (entry.mainnet_activation_epoch != null) return 'mainnet';
-    if (entry.devnet_activation_epoch != null) return 'devnet';
-    if (entry.testnet_activation_epoch != null) return 'testnet';
-    return 'pending';
-}
-
-function useFeatureGates() {
-    return useQuery({
-        queryFn: async (): Promise<FeatureGateEntry[]> => {
-            const response = await fetch(FEATURE_GATES_URL);
-            if (!response.ok) throw new Error(`feature gates fetch failed: ${response.status}`);
-            return (await response.json()) as FeatureGateEntry[];
-        },
-        queryKey: ['feature-gates'],
-        staleTime: Infinity,
-    });
-}
 
 const ROWS: PrimitiveRow[] = [
     {
@@ -66,7 +35,6 @@ const ROWS: PrimitiveRow[] = [
         security: '~100-bit',
         simd: 'SIMD-0302',
         simdUrl: `${SIMD_BASE}0302-bn254-g2-syscalls.md`,
-        status: 'mainnet',
         to: '/altbn128',
         uses: [
             'BLS multisigs — any number of members, one 64-byte signature, one on-chain check',
@@ -83,7 +51,6 @@ const ROWS: PrimitiveRow[] = [
         security: '128-bit',
         simd: 'SIMD-0388',
         simdUrl: `${SIMD_BASE}0388-bls12-381-syscalls.md`,
-        status: 'mainnet',
         to: '/bls12381',
         uses: ['Aggregate-key registries — members join or leave; the stored key stays one 192-byte point'],
     },
@@ -97,7 +64,6 @@ const ROWS: PrimitiveRow[] = [
         security: 'proof-specific',
         simd: 'SIMD-0153',
         simdUrl: `${SIMD_BASE}0153-elgamal-proof-program.md`,
-        status: 'mainnet',
         to: '/elgamal',
         uses: [
             'Confidential transfers — Token-2022 hides amounts while the chain validates them',
@@ -105,7 +71,6 @@ const ROWS: PrimitiveRow[] = [
         ],
     },
     {
-        comingSoon: true,
         encoding: 'n/a',
         example: 'Hash data with a proposed native SHA-512 syscall — a 64-byte output at syscall cost.',
         featureKey: 's512oDwgx8hjMnaQjXfqqrZroVj4HvC6TkN3iSSWXCh',
@@ -115,7 +80,7 @@ const ROWS: PrimitiveRow[] = [
         security: 'n/a',
         simd: 'SIMD-0512',
         simdUrl: `${SIMD_BASE}0512-sha512-syscall.md`,
-        status: 'pending',
+        actionLabel: 'View status',
         to: '/sha512',
         uses: [
             'Cheap on-chain hashing — the proposal targets the same cost model as existing hash syscalls',
@@ -124,21 +89,8 @@ const ROWS: PrimitiveRow[] = [
     },
 ];
 
-function renderPrimitiveName(name: string) {
-    const term = 'pairing curve';
-    const index = name.indexOf(term);
-    if (index === -1) return name;
-    return (
-        <>
-            {name.slice(0, index)}
-            <PairingTerm>{term}</PairingTerm>
-            {name.slice(index + term.length)}
-        </>
-    );
-}
-
 export function Overview() {
-    const { data: featureGates } = useFeatureGates();
+    const { data: featureGates, isError, isPending } = useFeatureGates();
     const [expanded, setExpanded] = useState<string | null>(null);
     return (
         <div className="space-y-12">
@@ -175,10 +127,10 @@ export function Overview() {
                     <thead>
                         <tr className="border-b text-left text-xs tracking-wide text-sand-1100 uppercase">
                             <th className="px-4 py-3 font-medium">Primitive</th>
-                            <th className="px-4 py-3 font-medium">SIMD</th>
-                            <th className="px-4 py-3 font-medium">Kind</th>
-                            <th className="px-4 py-3 font-medium">Operations</th>
-                            <th className="px-4 py-3 font-medium">
+                            <th className="hidden px-4 py-3 font-medium sm:table-cell">SIMD</th>
+                            <th className="hidden px-4 py-3 font-medium sm:table-cell">Kind</th>
+                            <th className="hidden px-4 py-3 font-medium sm:table-cell">Operations</th>
+                            <th className="hidden px-4 py-3 font-medium sm:table-cell">
                                 <span className="inline-flex items-center gap-1">
                                     Security
                                     <Tooltip>
@@ -198,7 +150,7 @@ export function Overview() {
                                     </Tooltip>
                                 </span>
                             </th>
-                            <th className="px-4 py-3 font-medium">Status</th>
+                            <th className="hidden px-4 py-3 font-medium sm:table-cell">Status</th>
                             <th className="px-4 py-3" />
                         </tr>
                     </thead>
@@ -222,10 +174,20 @@ export function Overview() {
                                                         isOpen && 'rotate-90',
                                                     )}
                                                 />
-                                                {renderPrimitiveName(row.name)}
+                                                {row.name}
                                             </button>
+                                            <span className="mt-1 block text-xs font-normal text-muted-foreground sm:hidden">
+                                                Status:{' '}
+                                                {isPending
+                                                    ? 'Loading…'
+                                                    : isError
+                                                      ? 'Unavailable'
+                                                      : featureGateStatus(
+                                                            featureGates?.find(f => f.key === row.featureKey),
+                                                        )}
+                                            </span>
                                         </td>
-                                        <td className="px-4 py-3 font-berkeley-mono text-xs">
+                                        <td className="hidden px-4 py-3 font-berkeley-mono text-xs sm:table-cell">
                                             <a
                                                 className="text-sand-1100 underline decoration-sand-700 underline-offset-2 hover:text-foreground"
                                                 href={row.simdUrl}
@@ -235,14 +197,23 @@ export function Overview() {
                                                 {row.simd}
                                             </a>
                                         </td>
-                                        <td className="px-4 py-3 text-muted-foreground">
+                                        <td className="hidden px-4 py-3 text-muted-foreground sm:table-cell">
                                             {row.kind === 'Syscall' ? <SyscallTerm>{row.kind}</SyscallTerm> : row.kind}
                                         </td>
-                                        <td className="px-4 py-3 text-muted-foreground">{row.ops}</td>
-                                        <td className="px-4 py-3 text-muted-foreground">{row.security}</td>
-                                        <td className="px-4 py-3 text-muted-foreground">
-                                            {activationStatus(featureGates?.find(f => f.key === row.featureKey)) ??
-                                                row.status}
+                                        <td className="hidden px-4 py-3 text-muted-foreground sm:table-cell">
+                                            {row.ops}
+                                        </td>
+                                        <td className="hidden px-4 py-3 text-muted-foreground sm:table-cell">
+                                            {row.security}
+                                        </td>
+                                        <td className="hidden px-4 py-3 text-muted-foreground sm:table-cell">
+                                            {isPending
+                                                ? 'Loading…'
+                                                : isError
+                                                  ? 'Unavailable'
+                                                  : featureGateStatus(
+                                                        featureGates?.find(f => f.key === row.featureKey),
+                                                    )}
                                         </td>
                                         <td className="px-4 py-3">
                                             {row.to ? (
@@ -250,8 +221,7 @@ export function Overview() {
                                                     className="inline-flex items-center gap-1 font-medium text-foreground hover:underline"
                                                     to={row.to}
                                                 >
-                                                    {row.comingSoon ? 'Coming soon' : 'Demo'}{' '}
-                                                    <ArrowRight className="h-3.5 w-3.5" />
+                                                    {row.actionLabel ?? 'Demo'} <ArrowRight className="h-3.5 w-3.5" />
                                                 </Link>
                                             ) : (
                                                 <span className="text-xs text-sand-900">soon</span>
@@ -262,6 +232,18 @@ export function Overview() {
                                         <tr className="border-b last:border-b-0" id={`detail-${row.simd}`}>
                                             <td className="px-4 pt-0 pb-4" colSpan={7}>
                                                 <div className="space-y-2 pl-5 text-sm">
+                                                    <dl className="grid grid-cols-[auto_1fr] gap-x-2 gap-y-1 text-xs sm:hidden">
+                                                        <dt className="text-muted-foreground">SIMD</dt>
+                                                        <dd>{row.simd}</dd>
+                                                        <dt className="text-muted-foreground">Kind</dt>
+                                                        <dd>{row.kind}</dd>
+                                                        <dt className="text-muted-foreground">Encoding</dt>
+                                                        <dd>{row.encoding}</dd>
+                                                        <dt className="text-muted-foreground">Operations</dt>
+                                                        <dd>{row.ops}</dd>
+                                                        <dt className="text-muted-foreground">Security</dt>
+                                                        <dd>{row.security}</dd>
+                                                    </dl>
                                                     <p className="text-foreground">{row.example}</p>
                                                     <ul className="list-disc space-y-1 pl-5 text-muted-foreground">
                                                         {row.uses.map(use => (
