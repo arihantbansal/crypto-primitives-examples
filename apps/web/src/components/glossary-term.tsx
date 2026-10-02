@@ -1,14 +1,20 @@
-import type { ReactNode } from 'react';
+import { useState, type MouseEvent, type ReactNode } from 'react';
 
 import { Tooltip, TooltipContent, TooltipTrigger } from '@/components/ui/tooltip';
 
 export function GlossaryTerm({ children, definition }: { children: ReactNode; definition: string }) {
+    const [open, setOpen] = useState(false);
+
     return (
-        <Tooltip>
+        <Tooltip open={open} onOpenChange={setOpen}>
             <TooltipTrigger asChild>
                 <button
                     type="button"
                     className="cursor-help underline decoration-dotted decoration-sand-700 underline-offset-2 focus-visible:outline-2 focus-visible:outline-offset-2"
+                    onClick={(event: MouseEvent<HTMLButtonElement>) => {
+                        event.preventDefault();
+                        setOpen(true);
+                    }}
                 >
                     {children}
                 </button>

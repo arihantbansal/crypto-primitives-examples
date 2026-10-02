@@ -55,11 +55,8 @@ function ClusterButton() {
 
     async function handleSave() {
         const trimmed = url.trim();
-        function showError(message: string) {
-            setRpcError(message);
-        }
         if (!isValidRpcUrl(trimmed)) {
-            showError('Enter a valid http(s) RPC URL.');
+            setRpcError('Enter a valid http(s) RPC URL.');
             return;
         }
         setRpcError(null);
@@ -67,17 +64,17 @@ function ClusterButton() {
         try {
             const network = await detectNetwork(trimmed);
             if (!network) {
-                showError('Could not detect the network from this RPC URL.');
+                setRpcError('This URL responded with an unknown Solana network. Use a devnet endpoint.');
                 return;
             }
             if (network !== 'devnet') {
-                showError('This demo runs on devnet only. Enter a devnet RPC URL.');
+                setRpcError('This demo runs on devnet only. Enter a devnet RPC URL.');
                 return;
             }
             saveCustomRpc(trimmed, network);
             window.location.reload();
         } catch {
-            showError('Could not reach this RPC URL. Check the address and try again.');
+            setRpcError('Could not reach this RPC URL. Check the address and try again.');
         } finally {
             setSaving(false);
         }

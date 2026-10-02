@@ -11,7 +11,7 @@ export function AppLayout({ children }: { children: React.ReactNode }) {
                 Skip to content
             </a>
             <AppHeader />
-            <main id="main-content" className="mx-auto w-full max-w-7xl scroll-mt-24 px-6 pt-24 pb-12">
+            <main id="main-content" tabIndex={-1} className="mx-auto w-full max-w-7xl scroll-mt-24 px-6 pt-24 pb-12">
                 {children}
             </main>
             <Toaster />
